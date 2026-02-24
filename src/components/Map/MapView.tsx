@@ -269,10 +269,42 @@ function setupGridOverlay(map: maplibregl.Map) {
 /* ═══════════════════════════════════════════════════════════════
    SIGHTING MARKERS — BIG, BRIGHT, DRAMATIC energy nodes
    ═══════════════════════════════════════════════════════════════ */
+/**
+ * Jitter co-located points so they fan out when a cluster expands.
+ * Groups points sharing exact same coords, then offsets duplicates
+ * in a spiral pattern (~100-300m apart — invisible at low zoom,
+ * clearly separated at high zoom).
+ */
+function jitterColocated(points: MapPoint[]): { lng: number; lat: number }[] {
+  const coords = points.map(p => ({ lng: p.longitude, lat: p.latitude }));
+  const groups = new Map<string, number[]>();
+  for (let i = 0; i < points.length; i++) {
+    const key = `${points[i].latitude},${points[i].longitude}`;
+    const arr = groups.get(key);
+    if (arr) arr.push(i);
+    else groups.set(key, [i]);
+  }
+  for (const indices of Array.from(groups.values())) {
+    if (indices.length < 2) continue;
+    // Spread duplicates in a spiral: ~0.001° ≈ 110 m
+    const step = 0.0012;
+    for (let k = 1; k < indices.length; k++) {
+      const angle = (k / indices.length) * Math.PI * 2;
+      const r = step * (1 + Math.floor(k / 8) * 0.5); // grow radius for large groups
+      coords[indices[k]] = {
+        lng: coords[indices[k]].lng + Math.cos(angle) * r,
+        lat: coords[indices[k]].lat + Math.sin(angle) * r,
+      };
+    }
+  }
+  return coords;
+}
+
 function updateSightingsSource(map: maplibregl.Map, points: MapPoint[]) {
+  const jittered = jitterColocated(points);
   const geojson: GeoJSON.FeatureCollection = {
     type: 'FeatureCollection',
-    features: points.map(p => ({
+    features: points.map((p, i) => ({
       type: 'Feature' as const,
       properties: {
         id: p.id,
@@ -282,7 +314,7 @@ function updateSightingsSource(map: maplibregl.Map, points: MapPoint[]) {
       },
       geometry: {
         type: 'Point' as const,
-        coordinates: [p.longitude, p.latitude],
+        coordinates: [jittered[i].lng, jittered[i].lat],
       },
     })),
   };
