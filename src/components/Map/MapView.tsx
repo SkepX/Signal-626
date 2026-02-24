@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
@@ -738,24 +738,49 @@ export default function MapView({
   const hoveredCountryRef = useRef<string | null>(null);
   const countryHoverRef = useRef(onCountryHover);
   const countryClickRef = useRef(onCountryClick);
+  const [webglFailed, setWebglFailed] = useState(false);
   countryHoverRef.current = onCountryHover;
   countryClickRef.current = onCountryClick;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: STYLE_URL,
-      center: [0, 20],
-      zoom: 1.8,
-      minZoom: 1.5,
-      maxZoom: MAP_MAX_ZOOM,
-      attributionControl: false,
-      fadeDuration: 0,
-    });
+    // Check WebGL availability before attempting map creation
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) {
+        setWebglFailed(true);
+        return;
+      }
+    } catch {
+      setWebglFailed(true);
+      return;
+    }
 
-    // Custom zoom buttons used instead of default NavigationControl
+    let map: maplibregl.Map;
+    try {
+      map = new maplibregl.Map({
+        container: containerRef.current,
+        style: STYLE_URL,
+        center: [0, 20],
+        zoom: 1.8,
+        minZoom: 1.5,
+        maxZoom: MAP_MAX_ZOOM,
+        attributionControl: false,
+        fadeDuration: 0,
+      });
+    } catch {
+      setWebglFailed(true);
+      return;
+    }
+
+    // Handle WebGL context loss at runtime
+    map.on('error', (e) => {
+      if (e.error?.message?.includes('WebGL') || e.error?.message?.includes('context')) {
+        setWebglFailed(true);
+      }
+    });
 
     map.on('load', () => {
       readyRef.current = true;
@@ -1029,6 +1054,31 @@ export default function MapView({
 
   const handleZoomIn = () => mapRef.current?.zoomIn({ duration: 300 });
   const handleZoomOut = () => mapRef.current?.zoomOut({ duration: 300 });
+
+  if (webglFailed) {
+    return (
+      <div className="relative w-full h-full flex items-center justify-center" style={{ background: '#070e1a' }}>
+        <div className="text-center px-6 max-w-md">
+          <div className="w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center"
+            style={{ border: '2px solid rgba(255,51,85,0.4)', background: 'rgba(255,51,85,0.05)' }}>
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
+              <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="#FF3355" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          </div>
+          <div className="font-display text-xl text-signal-red/90 tracking-[0.15em] mb-3"
+            style={{ textShadow: '0 0 20px rgba(255,51,85,0.3)' }}>
+            WEBGL UNAVAILABLE
+          </div>
+          <p className="text-sm text-signal-muted leading-relaxed mb-4">
+            This device or browser does not support WebGL, which is required for the interactive map.
+          </p>
+          <p className="text-xs text-signal-muted/60">
+            Try using a desktop browser (Chrome, Firefox, Edge) or enable hardware acceleration in your browser settings.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative w-full h-full map-container-glow">
